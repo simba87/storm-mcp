@@ -1,0 +1,53 @@
+services:
+  storm-api:
+    build: .
+    image: storm-api:latest
+    container_name: storm-api
+    restart: unless-stopped
+    # ── СЕТЬ ──────────────────────────────────────────────────────────────
+    # Для Ollama (локальный доступ к localhost:11434) раскомментируйте:
+    # network_mode: host
+    #
+    # Для удалённого провайдера (OpenAI, Anthropic, etc.) — оставьте как есть
+    # (стандартная bridge-сеть, доступ через internet)
+    # ──────────────────────────────────────────────────────────────────────
+    env_file:
+      - .env
+    environment:
+      - STORM_MAX_WORKERS=${STORM_MAX_WORKERS:-2}
+      - STORM_JOB_TIMEOUT=${STORM_JOB_TIMEOUT:-1800}
+    # ── ТОМЫ ──────────────────────────────────────────────────────────────
+    # Bind mounts — файлы результатов переживают compose down
+    # Доступны на хосте в ./data/output/{job_id}/
+    volumes:
+      - ./data/output:/data/output
+      - ./data/workdir:/data/workdir
+    # ──────────────────────────────────────────────────────────────────────
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 1G
+
+  # ── SearXNG (self-hosted search) ───────────────────────────────────────
+  # Запуск: docker compose --profile offline up -d
+  # Требует STORM_SEARCH_ENGINE=searxng в .env
+  searxng:
+    image: searxng/searxng:latest
+    container_name: storm-searxng
+    restart: unless-stopped
+    profiles: ["offline"]
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8080
+    volumes:
+      - searxng-data:/etc/searxng
+
+volumes:
+  searxng-data:

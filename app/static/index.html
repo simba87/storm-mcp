@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>STORM API — WebUI</title>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --surface2: #232733;
+    --border: #2e3340; --text: #e0e0e6; --text-dim: #888aa0;
+    --accent: #6c8cff; --accent-hover: #8aa3ff;
+    --green: #4ade80; --yellow: #facc15; --red: #f87171; --blue: #60a5fa;
+    --radius: 8px;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: 'Inter', -apple-system, 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--text);
+    height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+  }
+  header {
+    padding: 10px 20px; background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 16px;
+    flex-shrink: 0;
+  }
+  header h1 { font-size: 18px; font-weight: 600; }
+  header .badge {
+    padding: 3px 10px; border-radius: 20px; font-size: 12px;
+    background: var(--surface2); color: var(--text-dim);
+  }
+  header .badge.live { background: rgba(74,222,128,.15); color: var(--green); }
+
+  .main { display: flex; flex: 1; overflow: hidden; }
+
+  /* ─── Sidebar: jobs list ─── */
+  .sidebar {
+    width: 300px; min-width: 300px; background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+  }
+  .sidebar-header {
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .sidebar-header span { font-size: 14px; font-weight: 600; }
+  .btn-refresh {
+    background: none; border: none; color: var(--text-dim);
+    cursor: pointer; font-size: 16px; padding: 4px;
+  }
+  .btn-refresh:hover { color: var(--accent); }
+  .jobs-list { flex: 1; overflow-y: auto; }
+  .job-item {
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
+    cursor: pointer; transition: background .15s;
+  }
+  .job-item:hover { background: var(--surface2); }
+  .job-item.active { background: var(--surface2); border-left: 3px solid var(--accent); }
+  .job-item .topic { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .job-item .meta { font-size: 11px; color: var(--text-dim); margin-top: 3px; display: flex; gap: 8px; align-items: center; }
+
+  /* ─── Status badges ─── */
+  .status { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .status-pending   { background: rgba(250,204,21,.15); color: var(--yellow); }
+  .status-running   { background: rgba(96,165,250,.15); color: var(--blue); }
+  .status-done      { background: rgba(74,222,128,.15); color: var(--green); }
+  .status-failed    { background: rgba(248,113,113,.15); color: var(--red); }
+  .status-cancelled { background: rgba(136,138,160,.15); color: var(--text-dim); }
+
+  /* ─── Content area ─── */
+  .content { flex: 1; overflow-y: auto; padding: 20px; }
+
+  /* ─── Tabs ─── */
+  .tabs {
+    display: flex; gap: 2px; margin-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .tab {
+    padding: 8px 16px; cursor: pointer; font-size: 14px;
+    color: var(--text-dim); border-bottom: 2px solid transparent;
+    transition: all .15s;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* ─── Form ─── */
+  .form-section {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px; margin-bottom: 16px;
+  }
+  .form-section h3 { font-size: 14px; margin-bottom: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .5px; }
+  .form-row { display: flex; gap: 12px; margin-bottom: 12px; }
+  .form-row > * { flex: 1; }
+  .form-group { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+  .form-group label { font-size: 12px; color: var(--text-dim); }
+  input, select, textarea {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    padding: 8px 10px; border-radius: 6px; font-size: 14px; font-family: inherit;
+    outline: none; transition: border-color .15s;
+  }
+  input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+  textarea { resize: vertical; min-height: 60px; font-family: 'Cascadia Code', 'Consolas', monospace; }
+  .advanced-toggle {
+    cursor: pointer; font-size: 13px; color: var(--accent);
+    margin: 8px 0; user-select: none;
+  }
+  .advanced-toggle:hover { text-decoration: underline; }
+  .advanced-fields { display: none; }
+  .advanced-fields.open { display: block; }
+
+  /* ─── Buttons ─── */
+  .btn {
+    padding: 8px 20px; border: none; border-radius: 6px;
+    font-size: 14px; font-weight: 500; cursor: pointer;
+    transition: all .15s; font-family: inherit;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-danger { background: var(--red); color: #fff; }
+  .btn-secondary { background: var(--surface2); color: var(--text); }
+  .btn-secondary:hover { background: var(--border); }
+
+  /* ─── Output ─── */
+  .output-block {
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: var(--radius); margin-top: 16px;
+  }
+  .output-header {
+    padding: 8px 12px; border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .output-header span { font-size: 12px; color: var(--text-dim); text-transform: uppercase; }
+  .auto-poll-toggle {
+    font-size: 12px; cursor: pointer; color: var(--accent);
+    display: flex; align-items: center; gap: 4px; user-select: none;
+  }
+  .output-body {
+    padding: 12px; max-height: 500px; overflow-y: auto;
+    font-family: 'Cascadia Code', 'Consolas', 'JetBrains Mono', monospace;
+    font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+  }
+  .output-body.log { color: var(--text-dim); }
+  .output-body.article { color: var(--text); line-height: 1.7; font-size: 15px; font-family: 'Inter', sans-serif; }
+
+  /* ─── Empty state ─── */
+  .empty {
+    text-align: center; padding: 60px 20px; color: var(--text-dim);
+  }
+  .empty h2 { font-size: 18px; margin-bottom: 8px; }
+
+  /* ─── Result files ─── */
+  .files-grid { display: grid; grid-template-columns: 1fr; gap: 6px; }
+  .file-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 12px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; cursor: pointer; transition: border-color .15s;
+  }
+  .file-item:hover { border-color: var(--accent); }
+  .file-item .name { font-size: 13px; }
+  .file-item .icon { color: var(--text-dim); font-size: 16px; }
+
+  /* ─── Spinner ─── */
+  .spinner {
+    display: inline-block; width: 14px; height: 14px;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin .6s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .mono { font-family: 'Cascadia Code', 'Consolas', monospace; }
+  .dim { color: var(--text-dim); }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>⚡ STORM API</h1>
+  <span class="badge" id="api-status">offline</span>
+  <span class="badge" id="config-badge">—</span>
+  <span style="flex:1"></span>
+  <a href="/docs" target="_blank" class="badge">Swagger ↗</a>
+</header>
+
+<div class="main">
+
+  <!-- ══════════════ Sidebar ══════════════ -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <span>📋 Задачи <span class="dim" id="jobs-count">(0)</span></span>
+      <button class="btn-refresh" onclick="refreshJobs()" title="Обновить">🔄</button>
+    </div>
+    <div class="jobs-list" id="jobs-list">
+      <div class="empty" style="padding:30px 10px"><span class="dim" style="font-size:13px">Нет задач</span></div>
+    </div>
+    <div style="padding:10px 16px; border-top:1px solid var(--border)">
+      <button class="btn btn-primary" style="width:100%" onclick="selectTab('new')">+ Новое исследование</button>
+    </div>
+  </div>
+
+  <!-- ══════════════ Content ══════════════ -->
+  <div class="content">
+
+    <!-- ─── Tab: New research ─── -->
+    <div class="tab-content" id="tab-new">
+      <div class="tabs">
+        <div class="tab active">🚀 Новое исследование</div>
+      </div>
+
+      <div class="form-section">
+        <h3>Тема</h3>
+        <div class="form-group">
+          <input type="text" id="topic" placeholder="Например: History of quantum computing"
+                 style="font-size:15px" />
+        </div>
+        <div class="form-group">
+          <label>Дополнительные инструкции (необязательно)</label>
+          <textarea id="custom_instructions" placeholder="Focus on practical applications, not theory..."></textarea>
+        </div>
+      </div>
+
+      <div class="advanced-toggle" onclick="toggleAdvanced()">
+        ⚙️ Дополнительные параметры ▸
+      </div>
+
+      <div class="advanced-fields" id="advanced-fields">
+        <div class="form-section">
+          <h3>LLM</h3>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Provider</label>
+              <select id="llm_provider">
+                <option value="">(по умолчанию)</option>
+                <option value="openai">openai</option>
+                <option value="ollama">ollama</option>
+                <option value="claude">claude</option>
+                <option value="litellm">litellm</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Model name</label>
+              <input type="text" id="model_name" placeholder="gpt-4o, ornith:35b, ..." />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Temperature</label>
+              <input type="number" id="temperature" placeholder="0.7" step="0.1" min="0" max="2" />
+            </div>
+            <div class="form-group">
+              <label>Max tokens</label>
+              <input type="number" id="max_tokens" placeholder="500" step="100" min="100" />
+            </div>
+            <div class="form-group">
+              <label>Max conv steps</label>
+              <input type="number" id="max_conv_steps" placeholder="3" step="1" min="1" max="10" />
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <h3>Поиск</h3>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Search engine</label>
+              <select id="search_engine">
+                <option value="">(по умолчанию)</option>
+                <option value="duckduckgo">duckduckgo (free)</option>
+                <option value="you">you.com</option>
+                <option value="brave">brave</option>
+                <option value="tavily">tavily</option>
+                <option value="bing">bing</option>
+                <option value="serper">serper</option>
+                <option value="searxng">searxng</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Search top K</label>
+              <input type="number" id="search_top_k" placeholder="3" step="1" min="1" max="20" />
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <h3>Webhook</h3>
+          <div class="form-group">
+            <label>Callback URL (POST при завершении)</label>
+            <input type="text" id="callback_url" placeholder="https://your-app.com/webhook" />
+          </div>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" id="btn-submit" onclick="submitResearch()" style="margin-top:8px">
+        ▶ Запустить исследование
+      </button>
+    </div>
+
+    <!-- ─── Tab: Job detail ─── -->
+    <div class="tab-content" id="tab-detail">
+      <div class="tabs">
+        <div class="tab active" onclick="switchDetailTab('info', this)">ℹ️ Инфо</div>
+        <div class="tab" onclick="switchDetailTab('log', this)">📄 Лог</div>
+        <div class="tab" onclick="switchDetailTab('result', this)">📊 Результат</div>
+      </div>
+
+      <!-- info sub-tab -->
+      <div class="detail-sub" id="detail-info">
+        <div class="form-section">
+          <h3>Информация о задаче</h3>
+          <div id="job-info"></div>
+        </div>
+        <div id="job-actions" style="display:flex; gap:8px; margin-top:12px"></div>
+      </div>
+
+      <!-- log sub-tab -->
+      <div class="detail-sub" id="detail-log" style="display:none">
+        <div class="output-block">
+          <div class="output-header">
+            <span>📄 Лог выполнения</span>
+            <label class="auto-poll-toggle">
+              <input type="checkbox" id="auto-poll-log" checked onchange="toggleAutoPoll()"> Auto-refresh
+            </label>
+          </div>
+          <div class="output-body log" id="job-log">Загрузка...</div>
+        </div>
+      </div>
+
+      <!-- result sub-tab -->
+      <div class="detail-sub" id="detail-result" style="display:none">
+        <div id="job-result"></div>
+      </div>
+    </div>
+
+    <!-- ─── Empty state ─── -->
+    <div class="tab-content" id="tab-empty">
+      <div class="empty">
+        <h2>Выберите задачу слева</h2>
+        <p>или создайте новое исследование</p>
+      </div>
+    </div>
+
+  </div><!-- content -->
+</div><!-- main -->
+
+<script>
+const API = '';
+let currentJobId = null;
+let pollTimer = null;
+let autoPollLog = true;
+
+// ══════════════ Init ══════════════
+window.addEventListener('DOMContentLoaded', () => {
+  selectTab('new');
+  checkHealth();
+  refreshJobs();
+  setInterval(checkHealth, 15000);  // heartbeat
+  setInterval(refreshJobs, 5000);   // auto-refresh list
+});
+
+// ══════════════ Health ══════════════
+async function checkHealth() {
+  try {
+    const r = await fetch(`${API}/health`);
+    const d = await r.json();
+    const badge = document.getElementById('api-status');
+    badge.textContent = `● ${d.status}`;
+    badge.classList.add('live');
+    // Load config
+    try {
+      const cr = await fetch(`${API}/config`);
+      if (cr.ok) {
+        const cfg = await cr.json();
+        document.getElementById('config-badge').textContent =
+          `${cfg.llm_provider}/${cfg.model_name} · ${cfg.search_engine}`;
+      }
+    } catch(e) {}
+  } catch(e) {
+    const badge = document.getElementById('api-status');
+    badge.textContent = '● offline';
+    badge.classList.remove('live');
+  }
+}
+
+// ══════════════ Jobs list ══════════════
+async function refreshJobs() {
+  try {
+    const r = await fetch(`${API}/jobs?limit=50`);
+    const jobs = await r.json();
+    const list = document.getElementById('jobs-list');
+
+    document.getElementById('jobs-count').textContent = `(${jobs.length})`;
+
+    if (jobs.length === 0) {
+      list.innerHTML = '<div class="empty" style="padding:30px 10px"><span class="dim" style="font-size:13px">Нет задач</span></div>';
+      return;
+    }
+
+    list.innerHTML = jobs.map(j => `
+      <div class="job-item ${j.id === currentJobId ? 'active' : ''}" onclick="selectJob('${j.id}')">
+        <div class="topic">${escHtml(j.topic)}</div>
+        <div class="meta">
+          <span class="status status-${j.status}">${j.status}</span>
+          <span>${formatTime(j.finished_at || j.created_at)}</span>
+          <span class="dim mono" style="margin-left:auto">${j.id}</span>
+        </div>
+      </div>
+    `).join('');
+
+    // Auto-poll current job if running
+    if (currentJobId) {
+      const job = jobs.find(j => j.id === currentJobId);
+      if (job && (job.status === 'running' || job.status === 'pending')) {
+        updateJobDetail();
+      }
+    }
+  } catch(e) { console.error(e); }
+}
+
+// ══════════════ Tabs ══════════════
+function selectTab(name) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  if (name === 'new') {
+    document.getElementById('tab-new').classList.add('active');
+  } else if (currentJobId) {
+    document.getElementById('tab-detail').classList.add('active');
+  } else {
+    document.getElementById('tab-empty').classList.add('active');
+  }
+}
+
+function switchDetailTab(name, el) {
+  document.querySelectorAll('#tab-detail .tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  document.querySelectorAll('.detail-sub').forEach(d => d.style.display = 'none');
+  document.getElementById(`detail-${name}`).style.display = 'block';
+  if (name === 'log') fetchLog();
+  if (name === 'result') fetchResult();
+}
+
+// ══════════════ Select job ══════════════
+function selectJob(id) {
+  currentJobId = id;
+  document.querySelectorAll('.job-item').forEach(e => e.classList.remove('active'));
+  selectTab('detail');
+  updateJobDetail();
+  fetchLog();
+}
+
+// ══════════════ Update detail ══════════════
+async function updateJobDetail() {
+  if (!currentJobId) return;
+  try {
+    const r = await fetch(`${API}/jobs/${currentJobId}`);
+    const j = await r.json();
+
+    const dur = j.started_at && j.finished_at
+      ? `${Math.round((j.finished_at - j.started_at))}s`
+      : j.started_at ? `${Math.round(Date.now()/1000 - j.started_at)}s…` : '—';
+
+    document.getElementById('job-info').innerHTML = `
+      <table style="width:100%; font-size:14px;">
+        <tr><td class="dim" style="width:130px; padding:4px 0">ID</td><td class="mono">${j.id}</td></tr>
+        <tr><td class="dim" style="padding:4px 0">Тема</td><td><b>${escHtml(j.topic)}</b></td></tr>
+        <tr><td class="dim" style="padding:4px 0">Статус</td><td><span class="status status-${j.status}">${j.status}</span></td></tr>
+        <tr><td class="dim" style="padding:4px 0">PID</td><td class="mono">${j.pid || '—'}</td></tr>
+        <tr><td class="dim" style="padding:4px 0">Created</td><td>${formatTime(j.created_at)}</td></tr>
+        <tr><td class="dim" style="padding:4px 0">Started</td><td>${j.started_at ? formatTime(j.started_at) : '—'}</td></tr>
+        <tr><td class="dim" style="padding:4px 0">Finished</td><td>${j.finished_at ? formatTime(j.finished_at) : '—'}</td></tr>
+        <tr><td class="dim" style="padding:4px 0">Duration</td><td>${dur}</td></tr>
+        <tr><td class="dim" style="padding:4px 0">Return code</td><td class="mono">${j.return_code ?? '—'}</td></tr>
+        ${j.error ? `<tr><td class="dim" style="padding:4px 0; vertical-align:top">Error</td><td style="color:var(--red); white-space:pre-wrap">${escHtml(j.error.slice(0, 500))}</td></tr>` : ''}
+      </table>
+    `;
+
+    // Actions
+    const actions = document.getElementById('job-actions');
+    if (j.status === 'running' || j.status === 'pending') {
+      actions.innerHTML = `<button class="btn btn-danger" onclick="cancelJob()">⏹ Отменить</button>`;
+    } else if (j.status === 'done') {
+      actions.innerHTML = `<button class="btn btn-secondary" onclick="switchDetailTab('result', document.querySelectorAll('#tab-detail .tab')[2])">📊 Показать результат</button>`;
+    } else {
+      actions.innerHTML = `<button class="btn btn-secondary" onclick="switchDetailTab('log', document.querySelectorAll('#tab-detail .tab')[1])">📄 Посмотреть лог</button>`;
+    }
+    actions.innerHTML += ` <button class="btn btn-secondary" onclick="deleteJob()">🗑 Удалить</button>`;
+  } catch(e) { console.error(e); }
+}
+
+// ══════════════ Log ══════════════
+async function fetchLog() {
+  if (!currentJobId) return;
+  try {
+    const r = await fetch(`${API}/jobs/${currentJobId}/log`);
+    const text = await r.text();
+    document.getElementById('job-log').textContent = text || 'Лог пуст';
+    // Scroll to bottom
+    const el = document.getElementById('job-log');
+    el.scrollTop = el.scrollHeight;
+  } catch(e) { console.error(e); }
+}
+
+function toggleAutoPoll() {
+  autoPollLog = document.getElementById('auto-poll-log').checked;
+}
+
+// Poll log every 3s if tab visible and auto-poll on
+setInterval(() => {
+  if (currentJobId && autoPollLog) {
+    const logTab = document.getElementById('detail-log');
+    if (logTab.style.display !== 'none') {
+      fetchLog();
+    }
+  }
+}, 3000);
+
+// ══════════════ Result ══════════════
+async function fetchResult() {
+  if (!currentJobId) return;
+  try {
+    const r = await fetch(`${API}/jobs/${currentJobId}/result`);
+    if (!r.ok) {
+      const e = await r.json();
+      document.getElementById('job-result').innerHTML =
+        `<div class="form-section"><p style="color:var(--red)">${escHtml(e.detail)}</p></div>`;
+      return;
+    }
+    const d = await r.json();
+    const files = d.files || {};
+    const fileNames = Object.keys(files);
+
+    let html = '<div class="form-section"><h3>Файлы результата</h3>';
+
+    if (fileNames.length === 0) {
+      html += '<p class="dim">Нет файлов</p></div>';
+    } else {
+      html += '<div class="files-grid">';
+      for (const [name, url] of Object.entries(files)) {
+        const isArticle = name.includes('article') && name.endsWith('.txt');
+        html += `<div class="file-item" onclick="viewFile('${url}', ${isArticle})">
+          <span class="name">${isArticle ? '📄' : '📋'} ${escHtml(name)}</span>
+          <span class="icon">↗</span>
+        </div>`;
+      }
+      html += '</div></div>';
+      html += `<div class="output-block" id="file-viewer-block" style="display:none">
+        <div class="output-header">
+          <span id="file-viewer-name"></span>
+          <button class="btn-refresh" onclick="document.getElementById('file-viewer-body').textContent=''">✕</button>
+        </div>
+        <div class="output-body article" id="file-viewer-body"></div>
+      </div>`;
+    }
+
+    document.getElementById('job-result').innerHTML = html;
+  } catch(e) { console.error(e); }
+}
+
+async function viewFile(url, isArticle) {
+  try {
+    const r = await fetch(`${API}${url}`);
+    const text = await r.text();
+    const block = document.getElementById('file-viewer-block');
+    block.style.display = 'block';
+    document.getElementById('file-viewer-name').textContent = url.split('/').pop();
+    const body = document.getElementById('file-viewer-body');
+    body.className = isArticle ? 'output-body article' : 'output-body log';
+    body.textContent = text;
+    block.scrollIntoView({ behavior: 'smooth' });
+  } catch(e) { console.error(e); }
+}
+
+// ══════════════ Actions ══════════════
+async function submitResearch() {
+  const topic = document.getElementById('topic').value.trim();
+  if (!topic || topic.length < 3) { alert('Введите тему (минимум 3 символа)'); return; }
+
+  const body = { topic };
+
+  // Advanced fields
+  const ci = document.getElementById('custom_instructions').value.trim();
+  if (ci) body.custom_instructions = ci;
+
+  const lp = document.getElementById('llm_provider').value;
+  if (lp) body.llm_provider = lp;
+
+  const mn = document.getElementById('model_name').value.trim();
+  if (mn) body.model_name = mn;
+
+  const temp = document.getElementById('temperature').value;
+  if (temp) body.temperature = parseFloat(temp);
+
+  const mt = document.getElementById('max_tokens').value;
+  if (mt) body.max_tokens = parseInt(mt);
+
+  const mcs = document.getElementById('max_conv_steps').value;
+  if (mcs) body.max_conv_steps = parseInt(mcs);
+
+  const se = document.getElementById('search_engine').value;
+  if (se) body.search_engine = se;
+
+  const stk = document.getElementById('search_top_k').value;
+  if (stk) body.search_top_k = parseInt(stk);
+
+  const cb = document.getElementById('callback_url').value.trim();
+  if (cb) body.callback_url = cb;
+
+  const btn = document.getElementById('btn-submit');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Запуск...';
+
+  try {
+    const r = await fetch(`${API}/research`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!r.ok) {
+      const e = await r.json();
+      alert(`Ошибка: ${JSON.stringify(e.detail)}`);
+      return;
+    }
+
+    const job = await r.json();
+    btn.innerHTML = '✓ Запущено!';
+    setTimeout(() => { btn.innerHTML = '▶ Запустить исследование'; btn.disabled = false; }, 2000);
+
+    refreshJobs();
+    setTimeout(() => selectJob(job.id), 500);
+  } catch(e) {
+    alert(`Сетевая ошибка: ${e.message}`);
+    btn.disabled = false;
+    btn.innerHTML = '▶ Запустить исследование';
+  }
+}
+
+async function cancelJob() {
+  if (!currentJobId) return;
+  if (!confirm('Отменить задачу?')) return;
+  await fetch(`${API}/jobs/${currentJobId}/cancel`, { method: 'POST' });
+  updateJobDetail();
+  refreshJobs();
+}
+
+async function deleteJob() {
+  if (!currentJobId) return;
+  if (!confirm('Удалить задачу и все файлы?')) return;
+  await fetch(`${API}/jobs/${currentJobId}`, { method: 'DELETE' });
+  currentJobId = null;
+  selectTab('empty');
+  refreshJobs();
+}
+
+// ══════════════ Helpers ══════════════
+function toggleAdvanced() {
+  const f = document.getElementById('advanced-fields');
+  f.classList.toggle('open');
+  const t = document.querySelector('.advanced-toggle');
+  t.textContent = f.classList.contains('open')
+    ? '⚙️ Дополнительные параметры ▾'
+    : '⚙️ Дополнительные параметры ▸';
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function formatTime(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts * 1000);
+  return d.toLocaleTimeString('ru-RU', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+}
+</script>
+</body>
+</html>

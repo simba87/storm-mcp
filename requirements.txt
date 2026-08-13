@@ -1,0 +1,9 @@
+# Зависимости API-сервиса (STORM ставится отдельно в Dockerfile)
+# Для локальной разработки без Docker:
+#   pip install -r requirements.txt
+#   pip install knowledge-storm
+
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+httpx==0.28.1
+pydantic==2.10.4
