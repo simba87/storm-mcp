@@ -6,7 +6,7 @@ services:
     restart: unless-stopped
     # ── СЕТЬ ──────────────────────────────────────────────────────────────
     # Для Ollama (локальный доступ к localhost:11434) раскомментируйте:
-    # network_mode: host
+    network_mode: host   # Ollama на localhost:11434; для remote-провайдера закомментировать
     #
     # Для удалённого провайдера (OpenAI, Anthropic, etc.) — оставьте как есть
     # (стандартная bridge-сеть, доступ через internet)
