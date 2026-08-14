@@ -13,6 +13,7 @@
 - ✅ **Поддержка провайдеров**: OpenAI, Anthropic Claude, **Ollama** (нативно), litellm, любой OpenAI-compatible endpoint
 - ✅ **Поисковые движки**: you.com, Brave, Bing, Serper, Tavily, DuckDuckGo (free), SearXNG (self-hosted)
 - ✅ **Два режима**: локальная Ollama (`network_mode: host`) или удалённый API провайдер
+- 🔜 **MCP server** (roadmap) — REST API готов как база для MCP-инструментов, см. [раздел MCP](#mcp-server-roadmap)
 
 ## Быстрый старт
 
@@ -177,7 +178,7 @@ curl -X POST http://localhost:8000/research \
 
 > ⚠️ **Большие модели на CPU медленные.** ornith:35b (~15 t/s на 8 ядрах) генерирует одну статью 30–60 мин. Полный pipeline STORM делает ~50–100 LLM вызовов. Для быстрых тестов — `llama3.1:8b` или `qwen2.5:7b` (5–10 мин).
 >
-> ⚠️ **DuckDuckGo rate-limit.** Бесплатный DuckDuckGo лимитирует после ~50 поисков. Для стабильной работы используйте платный API (you.com, Brave, Tavily) или self-hosted SearXNG.
+> ⚠️ **DuckDuckGo rate-limit.** Бесплатный DuckDuckGo лимитирует после ~50 поисков за короткий промежуток. Один полный прогон STORM делает 30–100 поисков — вы упрётесь в лимит, задача упадёт с ошибкой `'DuckDuckGoSearchException' object has no attribute 'message'` (баг в dsp exception handler, обходится нашим `sitecustomize.py`, но поиск всё равно перестаёт отдавать результаты → `cosine_similarity` падает на пустых snippets). Проверено на практике. Для стабильной работы используйте платный API (you.com, **Brave** — протестирован, Tavily) или self-hosted SearXNG.
 
 ---
 
@@ -267,7 +268,7 @@ curl -X POST http://localhost:8000/research \
 
 | Engine | env key | Бесплатно |
 |---|---|---|
-| `duckduckgo` | — | ✅ (но rate-limit после ~50 запросов) |
+| `duckduckgo` | — | ✅ (но rate-limit после ~50 запросов — см. предупреждение выше; полный STORM-прогон упадёт) |
 | `you` | `YDC_API_KEY` | нет |
 | `brave` | `BRAVE_API_KEY` | нет |
 | `tavily` | `TAVILY_API_KEY` | нет |
@@ -299,6 +300,43 @@ docker compose --profile offline up -d   # поднимет SearXNG контей
 - ● **Status badge** в шапке — live-индикатор API + текущая конфигурация
 
 Никаких внешних зависимостей — чистый HTML/CSS/JS, раздаётся FastAPI как static.
+
+## MCP server (roadmap)
+
+REST API спроектирован как база для **MCP (Model Context Protocol) сервера** — цель проекта (`IDEA.md`). MCP-слой будет тонким адаптером поверх готовых endpoints:
+
+```
+LLM-агент (Hermes / Claude Desktop / Cursor)
+    │  MCP protocol (stdio)
+    ▼
+mcp_server.py  ← ~150 строк: валидация аргументов → REST-вызовы
+    │  HTTP (X-API-Key)
+    ▼
+storm-api (этот контейнер)
+```
+
+### Планируемые MCP tools
+
+| Tool | REST endpoint | Назначение |
+|---|---|---|
+| `storm_research` | `POST /research` | Запустить исследование (неблокирующий, вернуть `job_id`) |
+| `storm_job_status` | `GET /jobs/{id}` | Статус, duration, error |
+| `storm_job_log` | `GET /jobs/{id}/log` | Хвост лога (tail N строк) |
+| `storm_get_article` | `GET /jobs/{id}/files/.../storm_gen_article_polished.txt` | Финальный текст статьи |
+| `storm_list_sources` | `GET /jobs/{id}/files/.../url_to_info.json` | Источники исследования |
+| `storm_list_jobs` | `GET /jobs` | Список задач |
+| `storm_cancel_job` | `POST /jobs/{id}/cancel` | Отмена |
+
+### Почему поверх REST, а не напрямую к STORM
+
+- **Job-модель** (`pending → running → done/failed`) уже ложится на MCP-паттерн «запусти → полли → забери результат» — генерация статьи занимает 5–30+ мин, MCP tool не должен блокироваться
+- **Subprocess-изоляция** dspy/STORM уже решена внутри контейнера
+- **Auth** (`X-API-Key`) — MCP-сервер просто пробрасывает ключ из env
+- REST API остаётся единственным источником правды: его можно использовать и без MCP (curl, WebUI, интеграции)
+
+### Вариант транспортировки
+
+Планируется **stdio** (`mcpServers` entry в конфиге агента) — максимальная совместимость. Альтернатива — MCP endpoint внутри FastAPI (`/mcp`, streamable HTTP), один контейнер на всё, но требует MCP-клиента с HTTP-транспортом.
 
 ## Архитектура
 
