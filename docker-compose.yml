@@ -38,14 +38,14 @@ services:
 
   # ── SearXNG (self-hosted search) ───────────────────────────────────────
   # Запуск: docker compose --profile offline up -d
-  # Требует STORM_SEARCH_ENGINE=searxng в .env
+  # Требует STORM_SEARCH_ENGINE=searxng и STORM_SEARXNG_URL=http://searxng:8080 в .env
   searxng:
     image: searxng/searxng:latest
     container_name: storm-searxng
     restart: unless-stopped
     profiles: ["offline"]
     environment:
-      - SEARXNG_BASE_URL=http://localhost:8080
+      - SEARXNG_BASE_URL=http://searxng:8080
     volumes:
       - searxng-data:/etc/searxng
 

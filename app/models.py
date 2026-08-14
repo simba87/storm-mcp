@@ -35,11 +35,6 @@ class StormRequest(BaseModel):
         description="Тема исследования (например: 'History of quantum computing')",
         examples=["History of quantum computing"],
     )
-    custom_instructions: Optional[str] = Field(
-        None,
-        max_length=2000,
-        description="Дополнительные инструкции для STORM",
-    )
 
     # Переопределение LLM (если не задано — берётся из config/env)
     llm_provider: Optional[LLMProvider] = None

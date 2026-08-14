@@ -218,10 +218,6 @@
           <input type="text" id="topic" placeholder="Например: History of quantum computing"
                  style="font-size:15px" />
         </div>
-        <div class="form-group">
-          <label>Дополнительные инструкции (необязательно)</label>
-          <textarea id="custom_instructions" placeholder="Focus on practical applications, not theory..."></textarea>
-        </div>
       </div>
 
       <div class="advanced-toggle" onclick="toggleAdvanced()">
@@ -579,10 +575,6 @@ async function submitResearch() {
   if (!topic || topic.length < 3) { alert('Введите тему (минимум 3 символа)'); return; }
 
   const body = { topic };
-
-  // Advanced fields
-  const ci = document.getElementById('custom_instructions').value.trim();
-  if (ci) body.custom_instructions = ci;
 
   const lp = document.getElementById('llm_provider').value;
   if (lp) body.llm_provider = lp;

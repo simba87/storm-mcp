@@ -6,9 +6,10 @@ REST-обёртка над Stanford STORM для длительных иссле
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -30,20 +31,61 @@ logging.basicConfig(
 )
 log = logging.getLogger("storm-api")
 
+
+# ────────────────────── auth (X-API-Key) ─────────────────────
+def _check_api_key(request: Request) -> bool:
+    """Опциональная авторизация: если STORM_API_KEY задан — требуем X-API-Key.
+
+    STORM_API_KEY пуст → auth выключен (локальная разработка / Docker).
+    """
+    if not settings.API_KEY:
+        return True
+    return request.headers.get("X-API-Key", "") == settings.API_KEY
+
+
+async def require_api_key(request: Request):
+    if not _check_api_key(request):
+        raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key header")
+
+
+# ────────────────────── lifespan ──────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    log.info("STORM API starting")
+    log.info("  LLM provider : %s", settings.LLM_PROVIDER)
+    log.info("  Model        : %s", settings.MODEL_NAME)
+    log.info("  Search engine: %s", settings.SEARCH_ENGINE)
+    log.info("  Max workers  : %d", settings.MAX_WORKERS)
+    log.info("  Output dir   : %s", settings.OUTPUT_BASE)
+    log.info("  Workdir      : %s", settings.WORKDIR_BASE)
+    log.info("  Auth         : %s", "X-API-Key" if settings.API_KEY else "disabled (no STORM_API_KEY)")
+    yield
+    # Graceful shutdown: SIGTERM активным runner-ам, ждём до 10 сек
+    await jobs.shutdown_jobs()
+    log.info("STORM API stopped")
+
+
 # ──────────────────────────── app ────────────────────────────
 app = FastAPI(
     title="STORM API",
-    version="1.0.0",
+    version="1.1.0",
     description=(
         "REST-обёртка над [Stanford STORM](https://github.com/stanford-oval/storm). "
         "Запускайте длительные исследования через HTTP, получайте статьи "
         "в формате Wikipedia. Каждая задача асинхронна — результат доступен "
-        "по `/jobs/{{id}}/result`."
+        "по `/jobs/{id}/result`."
     ),
+    lifespan=lifespan,
 )
+
+# CORS: origins из env (comma-separated). "*" → все origins (только локальная разработка!)
+if settings.CORS_ORIGINS.strip() == "*":
+    _cors_origins = ["*"]
+else:
+    _cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -76,7 +118,7 @@ def _to_job_out(d: dict) -> JobOut:
 # ──────────────────────────── routes ──────────────────────────
 @app.get("/health", tags=["system"])
 async def health():
-    """Healthcheck для Docker."""
+    """Healthcheck для Docker (без auth — для probes)."""
     return {"status": "ok", "jobs_total": len(jobs.list_jobs(1000))}
 
 
@@ -93,6 +135,7 @@ async def get_config():
         "max_workers": settings.MAX_WORKERS,
         "job_timeout": settings.JOB_TIMEOUT_S,
         "do_polish": settings.DO_POLISH,
+        "auth_enabled": bool(settings.API_KEY),
     }
 
 
@@ -112,7 +155,7 @@ async def webui():
 async def root():
     return {
         "service": "storm-api",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "docs": "/docs",
         "webui": "/ui",
         "endpoints": {
@@ -129,7 +172,13 @@ async def root():
 
 
 # ──── создать исследование ────
-@app.post("/research", response_model=JobOut, status_code=201, tags=["research"])
+@app.post(
+    "/research",
+    response_model=JobOut,
+    status_code=201,
+    tags=["research"],
+    dependencies=[Depends(require_api_key)],
+)
 async def create_research(req: StormRequest):
     """
     Запускает STORM-исследование. Возвращает `job_id` — используйте его
@@ -142,21 +191,38 @@ async def create_research(req: StormRequest):
 
     Конфигурация LLM и поиска берётся из переменных окружения контейнера,
     но может быть переопределена в каждом запросе.
+
+    `callback_url` получает POST при переходе задачи в любой терминальный
+    статус (done/failed/cancelled). Разрешены только публичные http(s) URL —
+    private/loopback адреса отклоняются (SSRF protection).
     """
-    job_id = await jobs.create_job(req)
+    try:
+        job_id = await jobs.create_job(req)
+    except ValueError as e:
+        raise HTTPException(422, detail=str(e))
     d = jobs.get_job(job_id)
     return _to_job_out(d)
 
 
 # ──── получить статус ────
-@app.get("/jobs/{job_id}", response_model=JobOut, tags=["jobs"])
+@app.get(
+    "/jobs/{job_id}",
+    response_model=JobOut,
+    tags=["jobs"],
+    dependencies=[Depends(require_api_key)],
+)
 async def get_job(job_id: str):
     d = _job_or_404(job_id)
     return _to_job_out(d)
 
 
 # ──── список задач ────
-@app.get("/jobs", response_model=list[JobListOut], tags=["jobs"])
+@app.get(
+    "/jobs",
+    response_model=list[JobListOut],
+    tags=["jobs"],
+    dependencies=[Depends(require_api_key)],
+)
 async def list_jobs(limit: int = 50):
     """Возвращает список задач (новые первыми)."""
     items = jobs.list_jobs(limit)
@@ -177,6 +243,7 @@ async def list_jobs(limit: int = 50):
     "/jobs/{job_id}/log",
     response_class=PlainTextResponse,
     tags=["jobs"],
+    dependencies=[Depends(require_api_key)],
 )
 async def get_log(job_id: str):
     _job_or_404(job_id)
@@ -190,7 +257,11 @@ async def get_log(job_id: str):
 
 
 # ──── список файлов результата ────
-@app.get("/jobs/{job_id}/result", tags=["research"])
+@app.get(
+    "/jobs/{job_id}/result",
+    tags=["research"],
+    dependencies=[Depends(require_api_key)],
+)
 async def get_result(job_id: str):
     d = _job_or_404(job_id)
     if d["status"] != JobStatus.DONE:
@@ -210,7 +281,11 @@ async def get_result(job_id: str):
 
 
 # ──── скачать конкретный файл ────
-@app.get("/jobs/{job_id}/files/{file_path:path}", tags=["research"])
+@app.get(
+    "/jobs/{job_id}/files/{file_path:path}",
+    tags=["research"],
+    dependencies=[Depends(require_api_key)],
+)
 async def download_file(job_id: str, file_path: str):
     _job_or_404(job_id)
     content = jobs.get_file(job_id, file_path)
@@ -234,7 +309,12 @@ async def download_file(job_id: str, file_path: str):
 
 
 # ──── отменить задачу ────
-@app.post("/jobs/{job_id}/cancel", response_model=JobOut, tags=["jobs"])
+@app.post(
+    "/jobs/{job_id}/cancel",
+    response_model=JobOut,
+    tags=["jobs"],
+    dependencies=[Depends(require_api_key)],
+)
 async def cancel_job(job_id: str):
     d = _job_or_404(job_id)
     ok = jobs.cancel_job(job_id)
@@ -244,20 +324,12 @@ async def cancel_job(job_id: str):
 
 
 # ──── удалить задачу ────
-@app.delete("/jobs/{job_id}", tags=["jobs"])
+@app.delete(
+    "/jobs/{job_id}",
+    tags=["jobs"],
+    dependencies=[Depends(require_api_key)],
+)
 async def delete_job(job_id: str):
     _job_or_404(job_id)
     jobs.delete_job(job_id)
     return {"deleted": job_id}
-
-
-# ──────────────────────────── startup ────────────────────────
-@app.on_event("startup")
-async def _startup():
-    log.info("STORM API starting")
-    log.info("  LLM provider : %s", settings.LLM_PROVIDER)
-    log.info("  Model        : %s", settings.MODEL_NAME)
-    log.info("  Search engine: %s", settings.SEARCH_ENGINE)
-    log.info("  Max workers  : %d", settings.MAX_WORKERS)
-    log.info("  Output dir   : %s", settings.OUTPUT_BASE)
-    log.info("  Workdir      : %s", settings.WORKDIR_BASE)

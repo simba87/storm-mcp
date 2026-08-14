@@ -41,6 +41,9 @@ RUN pip install --no-cache-dir \
 COPY app/        /app/app/
 COPY scripts/    /app/scripts/
 
+# Хостовый umask может дать 600 — делаем читаемым для всех
+RUN chmod -R a+rX /app
+
 # sitecustomize.py (monkey-patch httpx UA) — должен быть на PYTHONPATH
 ENV PYTHONPATH="/app/app"
 
@@ -62,6 +65,13 @@ ENV STORM_OUTPUT_DIR=/data/output \
     STORM_MAX_CONV_STEPS=3 \
     STORM_API_HOST=0.0.0.0 \
     STORM_API_PORT=8000
+
+# Non-root user (bind mounts на хосте не будут root-owned).
+# UID можно переопределить при сборке: --build-arg STORM_UID=$(id -u)
+ARG STORM_UID=10001
+RUN useradd -r -s /usr/sbin/nologin -u ${STORM_UID} storm \
+    && chown -R storm:storm /data
+USER storm
 
 EXPOSE 8000
 

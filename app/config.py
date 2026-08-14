@@ -31,12 +31,19 @@ class Settings:
 
     # ── runner ──
     DO_POLISH: bool       = os.getenv("STORM_DO_POLISH", "true").lower() == "true"
-    MAX_WORKERS: int      = int(os.getenv("STORM_MAX_WORKERS", "4"))  # параллельных задач
+    MAX_WORKERS: int      = int(os.getenv("STORM_MAX_WORKERS", "2"))  # параллельных задач
     JOB_TIMEOUT_S: int    = int(os.getenv("STORM_JOB_TIMEOUT", "1800"))  # 30 min
 
     # ── API server ──
     API_HOST: str = os.getenv("STORM_API_HOST", "0.0.0.0")
     API_PORT: int = int(os.getenv("STORM_API_PORT", "8000"))
+
+    # ── security ──
+    # Если задан — все endpoints (кроме /health и /ui) требуют header X-API-Key.
+    # Пустой → auth выключен (локальная разработка / закрытый Docker network).
+    API_KEY: str = os.getenv("STORM_API_KEY", "")
+    # CORS origins, comma-separated. "*" → все (только для локальной разработки!).
+    CORS_ORIGINS: str = os.getenv("STORM_CORS_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000")
 
     def __init__(self):
         self.OUTPUT_BASE.mkdir(parents=True, exist_ok=True)
